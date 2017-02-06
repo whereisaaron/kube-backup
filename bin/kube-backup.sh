@@ -96,6 +96,7 @@ get_kubeconfig_secret ()
     mkdir -p "${HOME}/.kube"
     touch "${HOME}/.kube/config"; chmod 0600 "${HOME}/.kube/config"
     echo "$secret" | $BASE64 -d > "${HOME}/.kube/config"
+    echo "Fetched kubeconfig files from '$secret_name' secret"
   else
     echo "Failed to load kubeconfig from '$secret_name' secret"
     exit 2 
@@ -117,6 +118,7 @@ get_aws_secret ()
   if [[ "$?" -eq 0 ]]; then
     export AWS_ACCESS_KEY_ID=$(echo "$secrets[1]}" | $BASE64 -d)
     export AWS_SECRET_ACCESS_KEY=$(echo "$secrets[2]}" | $BASE64 -d)
+    echo "Fetched AWS credientials from '$secret_name' secret"
   else
     echo "Failed to load AWS credentials from '$secret_name' secret"
     exit 2 
@@ -127,7 +129,7 @@ check_for_aws_secret ()
 {
   local secret_name=$1
 
-  if [[ -z ${AWS_ACCESS_KEY_ID} ]]; then
+  if [[ -z "${AWS_ACCESS_KEY_ID}" ]]; then
     get_aws_secret $secret_name || return 1
   fi
 }
@@ -146,6 +148,7 @@ get_slack_secret ()
   local secret=$($KUBECTL get secret ${secret_name} -o jsonpath='{.data.SLACK_WEBHOOK}')
   if [[ "$?" -eq 0 ]]; then
     export SLACK_WEBHOOK=$(echo "$secret" | $BASE64 -d)
+    echo "Fetched Slack webhook from '$secret_name' secret"
     return 0
   else
     echo "Failed to load Slack webhook from '$secret_name' secret"
@@ -157,7 +160,7 @@ check_for_slack_secret ()
 {
   local secret_name=$1
 
-  if [[ -z ${SLACK_WEBHOOK} ]]; then
+  if [[ -z "${SLACK_WEBHOOK}" ]]; then
     get_slack_secret $secret_name || return 1
   fi
 }
@@ -185,6 +188,12 @@ send_slack_message ()
 SLACKEND
 
   echo "${body}" | curl -X POST -H 'Content-type: application/json' --data @- $SLACK_WEBHOOK
+
+  if [[ "$?" -eq 0 ]]; then
+    echo "Sent message to Slack: '$message'"
+  else
+    echo "Error sending message to Slack: '$message'"
+  fi
 }
 
 #
@@ -393,6 +402,9 @@ case $TASK in
   ;;
   slack-test)
     send_slack_message "Hello world" warning
+  ;;
+  dump-env)
+    env
   ;;
   *)
     # Unknown task
