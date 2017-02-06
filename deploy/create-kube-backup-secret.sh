@@ -5,6 +5,12 @@ set -e
 : ${AWS_ACCESS_KEY_ID?"Must define AWS_ACCESS_KEY_ID"}
 : ${AWS_SECRET_ACCESS_KEY?"Must define AWS_SECRET_ACCESS_KEY"}
 
+: ${KUBECONFIG_FILE:=kubeconfig}
+if [[ ! -r "${KUBECONFIG_FILE}" ]]; then
+  echo "kubeconfig file '${KUBECONFIG_FILE}' is missing"
+  exit 1
+fi
+
 : ${SECRET_NAME:=kube-backup}
 : ${SECRET_ENV:=system}
 : ${NAMESPACES:=kube-backup}
@@ -32,6 +38,7 @@ data:
   SLACK_WEBHOOK: $(echo -n "${SLACK_WEBHOOK}" | base64 -w 0)
   AWS_ACCESS_KEY_ID: $(echo -n "${AWS_ACCESS_KEY_ID}" | base64 -w 0)
   AWS_SECRET_ACCESS_KEY: $(echo -n "${AWS_SECRET_ACCESS_KEY}" | base64 -w 0)
+  kubeconfig: $(cat "${KUBECONFIG_FILE}" | base64 -w 0)
 END
 
 done

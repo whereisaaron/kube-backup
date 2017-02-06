@@ -4,6 +4,12 @@
 # Various strategies to back-up the contents of containers running on a Kubernetes cluster.
 # Aaron Roydhouse <aaron@roydhouse.com>, 2017
 #
+# Exit values
+# - Success: 0
+# - Task failed: 1
+# - Error occured: 2
+# - Missing dependancy: 3
+#
 
 VERSION=0.1
 
@@ -16,11 +22,11 @@ display_usage ()
   local script_name="$(basename $0)"
   echo "Usage:"
   echo "  ${script_name} --task=<task name> [options...]"
-  echo "    [--pod=<pod-name> --container=<container-name>]" 
+  echo "    [--pod=<pod-name> --container=<container-name>] [--secret=<secret name>]" 
   echo "    [--s3-bucket=<bucket name>] [--s3-prefix=<prefix>] [--aws-secret=<secret name>]"
-  echo "    [--s3-bucket=<bucket name>] [--s3-prefix=<prefix>] [--aws-secret=<secret name>]"
-  echo "    [--timestamp=<timestamp>]"
+  echo "    [--use-kubeconfig|--kubeconfig-secret=<secret name>]"
   echo "    [--slack-secret=<secret name>]"
+  echo "    [--timestamp=<timestamp>]"
   echo "    [--dry-run]"
   echo "  ${script_name} --help"
   echo "  ${script_name} --version"
@@ -39,7 +45,7 @@ check_tools ()
   for prog in "$@" envsubst; do
     if [ -z "$(which $prog)" ]; then
       echo "Missing dependency '${prog}'"
-      echo 10
+      echo 3
     fi
   done
 }
@@ -57,17 +63,42 @@ require_container ()
   
   if [[ -z $($KUBECTL get pod $pod $NS_ARG -o jsonpath="{.metadata.name}" 2> /dev/null) ]]; then
     echo "Pod '${pod}' not found"
-    exit 20
+    exit 3
   fi
 
   if [[ -z $($KUBECTL get pod $pod $NS_ARG -o jsonpath="{.spec.containers[?(@.name == \"${container}\")].name}") ]]; then
     echo "Container '${container}' not found in pod '${pod}'"
-    exit 21
+    exit 3
   fi
 
   if [[ "true" != $($KUBECTL get pod $pod $NS_ARG -o jsonpath="{.status.containerStatuses[?(@.name == \"${container}\")].ready}") ]]; then
     echo "Container '${container}' in pod '${pod}' is not ready"
-    exit 22
+    exit 3
+  fi
+}
+
+get_kubeconfig_secret ()
+{
+  local secret_name=$1
+
+  if [[ -z "${secret_name}" ]]; then
+    echo "No kubeconfig secret name specified"
+    exit 3
+  fi
+
+  if [[ -r "${HOME}/.kube/config" ]]; then
+    echo "kubeconfig file already exists at '${HOME}/.kube/config', not overwriting"
+    exit 2
+  fi
+
+  local secret=$($KUBECTL get secret ${secret_name} -o jsonpath='{.data.kubeconfig}')
+  if [[ "$?" -eq 0 ]]; then
+    mkdir -p "${HOME}/.kube"
+    touch "${HOME}/.kube/config"; chmod 0600 "${HOME}/.kube/config"
+    echo "$secret" | $BASE64 -d > "${HOME}/.kube/config"
+  else
+    echo "Failed to load kubeconfig from '$secret_name' secret"
+    exit 2 
   fi
 }
 
@@ -79,7 +110,7 @@ get_aws_secret ()
 
   if [[ -z "${secret_name}" ]]; then
     echo "No AWS secret name specified"
-    exit 23
+    exit 3
   fi
 
   local secrets=($($KUBECTL get secret ${secret_name} -o jsonpath='{.data.AWS_ACCESS_KEY_ID} {.data.AWS_SECRET_ACCESS_KEY}'))
@@ -88,7 +119,7 @@ get_aws_secret ()
     export AWS_SECRET_ACCESS_KEY=$(echo "$secrets[2]}" | $BASE64 -d)
   else
     echo "Failed to load AWS credentials from '$secret_name' secret"
-    exit 24 
+    exit 2 
   fi
 }
 
@@ -109,7 +140,7 @@ get_slack_secret ()
 
   if [[ -z "${secret_name}" ]]; then
     echo "No Slack secret name specified"
-    exit 23
+    exit 2
   fi
 
   local secret=$($KUBECTL get secret ${secret_name} -o jsonpath='{.data.SLACK_WEBHOOK}')
@@ -177,7 +208,7 @@ backup_mysql_exec ()
 
   if [[ -z "${DATABASE}" ]]; then
     echo "No database name specified"
-    exit 30
+    exit 3
   fi
 
   local backup_filename="${DATABASE}-mysql-database-${TIMESTAMP}.gz"
@@ -213,7 +244,7 @@ backup_mysql_exec ()
 
   if [[ $? -ne 0 ]]; then
     echo "Failed to complete backup"
-    echo 30
+    echo 2
   else
     echo "Success"
   fi 
@@ -256,6 +287,10 @@ case $i in
   S3_PREFIX="${i#*=}"
   shift # past argument=value
   ;;
+  --secret=*)
+  SECRET="${i#*=}"
+  shift # past argument=value
+  ;;
   --aws-secret=*)
   AWS_SECRET="${i#*=}"
   shift # past argument=value
@@ -263,6 +298,15 @@ case $i in
   --slack-secret=*)
   AWS_SECRET="${i#*=}"
   shift # past argument=value
+  ;;
+  --kubeconfig-secret=*)
+  KUBECONFIG_SECRET="${i#*=}"
+  USE_KUBECONFIG=true
+  shift # past argument=value
+  ;;
+  --use-kubeconfig)
+  USE_KUBECONFIG=true
+  shift # past argument with no value
   ;;
   --timestamp=*)
   TIMESTAMP="${i#*=}"
@@ -296,7 +340,7 @@ done
 if [[ -z "$TASK" ]]; then
   echo "No task specified"
   display_usage
-  exit 2
+  exit 3
 fi
 
 : ${KUBECTL:=kubectl}
@@ -305,12 +349,21 @@ fi
 : ${BASE64:=base64}
 check_tools $KUBECTL $AWSCLI $ENVSUBST $BASE64
 
-# Default AWS secret name is 'kube-backup' in the same namespace
-# Only used is an AWS key/secret is not in the environment already
-: ${AWS_SECRET:=kube-backup}
+# Default secret name is 'kube-backup' in the same namespace
+# This is the default secret for all other secrets
+# Can be overridden individually
+: ${SECRET:=kube-backup}
+
+: ${KUBECONFIG_SECRET:=$SECRET}
+if [[ "$USE_KUBECONFIG" == "true" ]]; then
+  get_kubeconfig_secret $KUBECONFIG_SECRET
+fi
+
+# Only used if an AWS key/secret is not in the environment already
+: ${AWS_SECRET:=$SECRET}
 
 # Get optional slack webhook URL
-: ${SLACK_SECRET:=kube-backup}
+: ${SLACK_SECRET:=$SECRET}
 check_for_slack_secret $SLACK_SECRET
 
 # Work out the target namespace
@@ -336,7 +389,8 @@ fi
 # Run task
 case $TASK in
   backup-mysql-exec)
-    backup_mysql_exec;;
+    backup_mysql_exec
+  ;;
   slack-test)
     send_slack_message "Hello world" warning
   ;;
@@ -344,6 +398,6 @@ case $TASK in
     # Unknown task
     echo "Unknown task '${TASK}'"
     display_usage
-    exit 1
+    exit 3
   ;;
 esac
