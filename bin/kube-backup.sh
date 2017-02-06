@@ -15,10 +15,12 @@ display_usage ()
 {
   local script_name="$(basename $0)"
   echo "Usage:"
-  echo "  ${script_name} --task=<task-name> [options...]"
+  echo "  ${script_name} --task=<task name> [options...]"
   echo "    [--pod=<pod-name> --container=<container-name>]" 
-  echo "    [--s3-bucket=<bucket-name>] [--s3-prefix=<prefix>]"
+  echo "    [--s3-bucket=<bucket name>] [--s3-prefix=<prefix>] [--aws-secret=<secret name>]"
+  echo "    [--s3-bucket=<bucket name>] [--s3-prefix=<prefix>] [--aws-secret=<secret name>]"
   echo "    [--timestamp=<timestamp>]"
+  echo "    [--slack-secret=<secret name>]"
   echo "    [--dry-run]"
   echo "  ${script_name} --help"
   echo "  ${script_name} --version"
@@ -69,6 +71,91 @@ require_container ()
   fi
 }
 
+# Get AWS key and secret from a Kubernetes secret 
+# Only in the current namespace
+get_aws_secret ()
+{
+  local secret_name=$1
+
+  if [[ -z "${secret_name}" ]]; then
+    echo "No AWS secret name specified"
+    exit 23
+  fi
+
+  local secrets=($($KUBECTL get secret ${secret_name} -o jsonpath='{.data.AWS_ACCESS_KEY_ID} {.data.AWS_SECRET_ACCESS_KEY}'))
+  if [[ "$?" -eq 0 ]]; then
+    export AWS_ACCESS_KEY_ID=$(echo "$secrets[1]}" | $BASE64 -d)
+    export AWS_SECRET_ACCESS_KEY=$(echo "$secrets[2]}" | $BASE64 -d)
+  else
+    echo "Failed to load AWS credentials from '$secret_name' secret"
+    exit 24 
+  fi
+}
+
+check_for_aws_secret ()
+{
+  local secret_name=$1
+
+  if [[ -z ${AWS_ACCESS_KEY_ID} ]]; then
+    get aws_secret $secret_name || return 1
+  fi
+}
+
+# Get Slack webhook URL from a Kubernetes secret 
+# Only looks only in the current namespace
+get_slack_secret ()
+{
+  local secret_name=$1
+
+  if [[ -z "${secret_name}" ]]; then
+    echo "No Slack secret name specified"
+    exit 23
+  fi
+
+  local secret=$($KUBECTL get secret ${secret_name} -o jsonpath='{.data.SLACK_WEBHOOK}')
+  if [[ "$?" -eq 0 ]]; then
+    export SLACK_WEBHOOK=$(echo "$secret" | $BASE64 -d)
+    return 0
+  else
+    echo "Failed to load Slack webhook from '$secret_name' secret"
+    return 1
+  fi
+}
+
+check_for_slack_secret ()
+{
+  local secret_name=$1
+
+  if [[ -z ${SLACK_WEBHOOK} ]]; then
+    get aws_secret $secret_name || return 1
+  fi
+}
+
+send_slack_message ()
+{
+  local message=$1 color=$2
+
+  if [[ -z "${SLACK_WEBHOOK}" || -z "${message}" ]]; then 
+    return 
+  fi
+  : ${color:='good'}
+
+  local body
+  read -r -d '' fancy_body <<SLACKEND
+{
+  "attachments": [
+    {
+      "fallback": "${message}",
+      "color": "${color}",
+      "text": "${message}"
+    }
+  ]
+}
+SLACKEND
+
+  echo "${body}" | curl -X POST -H 'Content-type: application/json' --data @- $SLACK_WEBHOOK
+}
+
 #
 # Backup tasks
 #
@@ -76,6 +163,10 @@ require_container ()
 backup_mysql_exec ()
 {
   require_container $POD $CONTAINER
+
+  if [[ -n "$S3_BUCKET" ]]; then
+    check_for_aws_secret $AWS_SECRET
+  fi
 
   local cmd="${KUBECTL} exec -i ${POD} --container=${CONTAINER} ${NS_ARG} --"
 
@@ -97,12 +188,27 @@ backup_mysql_exec ()
     [[ "$S3_PREFIX" =~ ^/*(.*[^/])/*$ ]] && local prefix=${BASH_REMATCH[1]}; prefix=${prefix}${prefix+/}
     local target="s3://${S3_BUCKET}/${prefix}${BACKUP_PATH}/${backup_filename}"
     echo "Backing up MySQL database '${DATABASE}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
-    $cmd bash -c "${backup_cmd}" | ${AWSCLI} s3 cp - "${target}"
+    if [[ "${DRY_RUN}" != "true" ]]; then
+      $cmd bash -c "${backup_cmd}" | ${AWSCLI} s3 cp - "${target}"
+      if [[ "$?" -eq 0 ]];then
+        send_slack_message "Backed up MySQL database '${DATABASE}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
+      else
+        local msg="Error: Failed to back up MySQL database '${DATABASE}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
+        send_slack_message "$msg" danger 
+        echo "$msg"
+      fi
+    else
+      echo "Skipping backup, dry run delected"
+    fi
   else
     local target="${BACKUP_PATH}/${backup_filename}"
     echo "Backing up MySQL database '${DATABASE}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
     mkdir -p "${BACKUP_PATH}"
-    $cmd bash -c "${backup_cmd}" > "${target}"
+    if [[ "${DRY_RUN}" != "true" ]]; then
+      $cmd bash -c "${backup_cmd}" > "${target}"
+    else
+      echo "Skipping backup, dry run delected"
+    fi
   fi
 
   if [[ $? -ne 0 ]]; then
@@ -150,6 +256,14 @@ case $i in
   S3_PREFIX="${i#*=}"
   shift # past argument=value
   ;;
+  --aws-secret=*)
+  AWS_SECRET="${i#*=}"
+  shift # past argument=value
+  ;;
+  --slack-secret=*)
+  AWS_SECRET="${i#*=}"
+  shift # past argument=value
+  ;;
   --timestamp=*)
   TIMESTAMP="${i#*=}"
   shift # past argument=value
@@ -188,7 +302,16 @@ fi
 : ${KUBECTL:=kubectl}
 : ${AWSCLI:=aws}
 : ${ENVSUBST:=envsubst}
-check_tools $KUBECTL $AWSCLI $ENVSUBST
+: ${BASE64:=base64}
+check_tools $KUBECTL $AWSCLI $ENVSUBST $BASE64
+
+# Default AWS secret name is 'kube-backup' in the same namespace
+# Only used is an AWS key/secret is not in the environment already
+: ${AWS_SECRET:=kube-backup}
+
+# Get optional slack webhook URL
+: ${SLACK_SECRET:=kube-backup}
+check_for_slack_secret $SLACK_SECRET
 
 # Work out the target namespace
 if [[ -z "${NAMESPACE}" ]]; then
@@ -210,11 +333,14 @@ NS_ARG=${NAMESPACE+--namespace=$NAMESPACE}
 # Run task
 case $TASK in
   backup-mysql-exec)
-  backup_mysql_exec;;
+    backup_mysql_exec;;
+  slack-test)
+    send_slack_message "Hello world" warning
+  ;;
   *)
-  # Unknown task
-  echo "Unknown task '${TASK}'"
-  display_usage
-  exit 1
+    # Unknown task
+    echo "Unknown task '${TASK}'"
+    display_usage
+    exit 1
   ;;
 esac
