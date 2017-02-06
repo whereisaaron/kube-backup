@@ -4,7 +4,7 @@ Utility container for Kubernetes to backup databases and files from other contai
 
 Available on [Docker Hub](https://hub.docker.com/r/whereisaaron/kube-backup/).
 
-*This is an early prototype - it kinda works at best*
+*This is an early prototype. it kinda works. sometimes.*
 
 ```
 kubectl run -it --rm kube-backup --image whereisaaron/kube-backup --namespace=kube-backup --restart='Never' -- \
@@ -14,11 +14,13 @@ kubectl run -it --rm kube-backup --image whereisaaron/kube-backup --namespace=ku
 ```
 Usage:
   kube-backup.sh --task=<task name> [options...]
+  kube-backup.sh --task=backup-mysql-exec [--database=<db name>] [options...]
+  kube-backup.sh --task=backup-files-exec [--files-path=<files path>] [options...]
     [--pod=<pod-name> --container=<container-name>] [--secret=<secret name>]
     [--s3-bucket=<bucket name>] [--s3-prefix=<prefix>] [--aws-secret=<secret name>]
-    [--use-kubeconfig|--kubeconfig-secret=<secret name>]
+    [--use-kubeconfig-from-secret|--kubeconfig-secret=<secret name>]
     [--slack-secret=<secret name>]
-    [--timestamp=<timestamp>]
+    [--timestamp=<timestamp>] [--backup-name=<backup name>]
     [--dry-run]
   kube-backup.sh --help
   kube-backup.sh --version

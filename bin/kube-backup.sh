@@ -22,11 +22,13 @@ display_usage ()
   local script_name="$(basename $0)"
   echo "Usage:"
   echo "  ${script_name} --task=<task name> [options...]"
+  echo "  ${script_name} --task=backup-mysql-exec [--database=<db name>] [options...]"
+  echo "  ${script_name} --task=backup-files-exec [--files-path=<files path>] [options...]"
   echo "    [--pod=<pod-name> --container=<container-name>] [--secret=<secret name>]" 
   echo "    [--s3-bucket=<bucket name>] [--s3-prefix=<prefix>] [--aws-secret=<secret name>]"
-  echo "    [--use-kubeconfig|--kubeconfig-secret=<secret name>]"
+  echo "    [--use-kubeconfig-from-secret|--kubeconfig-secret=<secret name>]"
   echo "    [--slack-secret=<secret name>]"
-  echo "    [--timestamp=<timestamp>]"
+  echo "    [--timestamp=<timestamp>] [--backup-name=<backup name>]"
   echo "    [--dry-run]"
   echo "  ${script_name} --help"
   echo "  ${script_name} --version"
@@ -252,7 +254,13 @@ backup_mysql_exec ()
     exit 3
   fi
 
-  local backup_filename="${DATABASE}-mysql-database-${TIMESTAMP}.gz"
+  if [[ -z "${BACKUP_NAME}" ]]; then
+    local file_prefix="$(echo ${DATABASE} | sed -e 's/[^A-Za-z0-9_-]/_/g' | sed -e 's/^_\+//')-mysql"
+  else
+    local file_prefix="$(echo ${BACKUP_NAME} | sed -e 's/[^A-Za-z0-9_-]/_/g' | sed -e 's/^_\+//')"
+  fi
+  
+  local backup_filename="${file_prefix}-${TIMESTAMP}.gz"
   local backup_cmd="mysqldump '${DATABASE}' --user=\"\${MYSQL_USER}\" --password=\"\${MYSQL_PASSWORD}\" --single-transaction | gzip"
 
   BACKUP_PATH="${NAMESPACE-default}/${TIMESTAMP}"
@@ -282,16 +290,62 @@ backup_mysql_exec ()
       echo "Skipping backup, dry run delected"
     fi
   fi
-
-  if [[ $? -ne 0 ]]; then
-    echo "Failed to complete backup"
-    echo 2
-  else
-    echo "Success"
-  fi 
-
-  echo "Done"
 }
+
+backup_files_exec ()
+{
+  require_container $POD $CONTAINER
+
+  check_for_s3_secret $AWS_SECRET
+  if [[ -n "$S3_BUCKET" ]]; then
+    check_for_aws_secret $AWS_SECRET
+  fi
+
+  local cmd="${KUBECTL} exec -i ${POD} --container=${CONTAINER} ${NS_ARG} --"
+
+  if [[ -z "${FILES_PATH}" ]]; then
+    echo "No backup path specified"
+    exit 3
+  fi
+
+  if [[ -z "${BACKUP_NAME}" ]]; then
+    local file_prefix="$(echo ${FILES_PATH} | sed -e 's/[^A-Za-z0-9_-]/_/g' | sed -e 's/^_\+//')-files"
+  else
+    local file_prefix="$(echo ${BACKUP_NAME} | sed -e 's/[^A-Za-z0-9_-]/_/g' | sed -e 's/^_\+//')"
+  fi
+
+  local backup_filename="${file_prefix}-${TIMESTAMP}.gz"
+  local backup_cmd="tar czf - '${FILES_PATH}'"
+
+  BACKUP_PATH="${NAMESPACE-default}/${TIMESTAMP}"
+  if [[ -n "${S3_BUCKET}" ]]; then
+    [[ "$S3_PREFIX" =~ ^/*(.*[^/])/*$ ]] && local prefix=${BASH_REMATCH[1]}; prefix=${prefix}${prefix+/}
+    local target="s3://${S3_BUCKET}/${prefix}${BACKUP_PATH}/${backup_filename}"
+    echo "Backing up files in '${FILES_PATH}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
+    if [[ "${DRY_RUN}" != "true" ]]; then
+      $cmd bash -c "${backup_cmd}" | ${AWSCLI} s3 cp - "${target}"
+      if [[ "$?" -eq 0 ]];then
+        send_slack_message "Backed up files in '${FILES_PATH}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
+      else
+        local msg="Error: Failed to back up files in '${FILES_PATH}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
+        send_slack_message "$msg" danger 
+        echo "$msg"
+      fi
+    else
+      echo "Skipping backup, dry run delected"
+    fi
+  else
+    local target="${BACKUP_PATH}/${backup_filename}"
+    echo "Backing up files in '${FILES_PATH}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
+    mkdir -p "${BACKUP_PATH}"
+    if [[ "${DRY_RUN}" != "true" ]]; then
+      $cmd bash -c "${backup_cmd}" > "${target}"
+    else
+      echo "Skipping backup, dry run delected"
+    fi
+  fi
+}
+
 
 #
 # Parse options
@@ -320,6 +374,10 @@ case $i in
   DATABASE="${i#*=}"
   shift # past argument=value
   ;;
+  --files-path=*)
+  FILES_PATH="${i#*=}"
+  shift # past argument=value
+  ;;
   --s3-bucket=*)
   S3_BUCKET="${i#*=}"
   shift # past argument=value
@@ -345,12 +403,16 @@ case $i in
   USE_KUBECONFIG=true
   shift # past argument=value
   ;;
-  --use-kubeconfig)
+  --use-kubeconfig-from-secret)
   USE_KUBECONFIG=true
   shift # past argument with no value
   ;;
   --timestamp=*)
   TIMESTAMP="${i#*=}"
+  shift # past argument=value
+  ;;
+  --backup-name=*)
+  BACKUP_NAME="${i#*=}"
   shift # past argument=value
   ;;
   --dry-run)
@@ -432,6 +494,9 @@ case $TASK in
   backup-mysql-exec)
     backup_mysql_exec
   ;;
+  backup-files-exec)
+    backup_files_exec
+  ;;
   test-slack)
     send_slack_message "Hello world" warning
   ;;
@@ -449,3 +514,5 @@ case $TASK in
     exit 3
   ;;
 esac
+
+echo "Done"
