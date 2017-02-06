@@ -7,7 +7,7 @@ set -e
 
 : ${SECRET_NAME:=kube-backup}
 : ${SECRET_ENV:=system}
-: ${NAMESPACES:=default}
+: ${NAMESPACES:=kube-backup}
 # Optionally create secret in all namespaces
 #NAMESPACES="$(kubectl get namespace -o jsonpath='{..name}')"
 
@@ -26,6 +26,7 @@ type: kubernetes.io/opaque
 metadata:
   name: $SECRET_NAME
   labels:
+    app: kube-backup
     env: $SECRET_ENV
 data:
   SLACK_WEBHOOK: $(echo -n "${SLACK_WEBHOOK}" | base64 -w 0)
