@@ -116,8 +116,8 @@ get_aws_secret ()
 
   local secrets=($($KUBECTL get secret ${secret_name} -o jsonpath='{.data.AWS_ACCESS_KEY_ID} {.data.AWS_SECRET_ACCESS_KEY}'))
   if [[ "$?" -eq 0 ]]; then
-    export AWS_ACCESS_KEY_ID=$(echo "${secrets[1]}" | $BASE64 -d)
-    export AWS_SECRET_ACCESS_KEY=$(echo "${secrets[2]}" | $BASE64 -d)
+    export AWS_ACCESS_KEY_ID=$(echo "${secrets[0]}" | $BASE64 -d)
+    export AWS_SECRET_ACCESS_KEY=$(echo "${secrets[1]}" | $BASE64 -d)
     echo "Fetched AWS credientials from '$secret_name' secret"
   else
     echo "Failed to load AWS credentials from '$secret_name' secret"
@@ -131,6 +131,37 @@ check_for_aws_secret ()
 
   if [[ -z "${AWS_ACCESS_KEY_ID}" ]]; then
     get_aws_secret $secret_name || return 1
+  fi
+}
+
+# Get AWS S3 settings from a Kubernetes secret 
+# Only looks only in the current namespace
+get_s3_secret ()
+{
+  local secret_name=$1
+
+  if [[ -z "${secret_name}" ]]; then
+    echo "No S3 secret name specified"
+    exit 2
+  fi
+
+  local secret=$($KUBECTL get secret ${secret_name} -o jsonpath='{.data.S3_BUCKET}')
+  if [[ "$?" -eq 0 ]]; then
+    export S3_BUCKET=$(echo "$secret" | $BASE64 -d)
+    echo "Fetched S3 bucket name from '$secret_name' secret"
+    return 0
+  else
+    echo "Failed to load S3 bucket from '$secret_name' secret"
+    return 1
+  fi
+}
+
+check_for_s3_secret ()
+{
+  local secret_name=$1
+
+  if [[ -z "${S3_BUCKET}" ]]; then
+    get_s3_secret $secret_name || return 1
   fi
 }
 
@@ -204,6 +235,7 @@ backup_mysql_exec ()
 {
   require_container $POD $CONTAINER
 
+  check_for_s3_secret $AWS_SECRET
   if [[ -n "$S3_BUCKET" ]]; then
     check_for_aws_secret $AWS_SECRET
   fi
