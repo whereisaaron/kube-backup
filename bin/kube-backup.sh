@@ -315,7 +315,7 @@ check_for_slack_secret $SLACK_SECRET
 
 # Work out the target namespace
 if [[ -z "${NAMESPACE}" ]]; then
-  NAMESPACE=$($KUBECTL config view --minify -o jsonpath="{.contexts[0].context.namespace} 2&> /dev/null")
+  NAMESPACE=$($KUBECTL config view --minify -o jsonpath="{.contexts[0].context.namespace} 2> /dev/null")
   if [[ -z "${NAMESPACE}" ]]; then
     echo "No task namespace specified"
   fi
