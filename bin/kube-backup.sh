@@ -406,6 +406,10 @@ case $TASK in
   dump-env)
     env
   ;;
+  test-aws)
+    check_for_aws_secret $AWS_SECRET
+    env
+  ;;
   *)
     # Unknown task
     echo "Unknown task '${TASK}'"
