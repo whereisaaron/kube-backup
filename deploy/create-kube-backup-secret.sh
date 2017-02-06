@@ -5,6 +5,10 @@ set -e
 : ${AWS_ACCESS_KEY_ID?"Must define AWS_ACCESS_KEY_ID"}
 : ${AWS_SECRET_ACCESS_KEY?"Must define AWS_SECRET_ACCESS_KEY"}
 
+if [[ -n "$S3_BUCKET" ]]; then
+  S3_SECRET_ITEM="S3_BUCKET: $(echo -n "${S3_BUCKET}" | base64 -w 0)"
+fi
+
 : ${KUBECONFIG_FILE:=kubeconfig}
 if [[ ! -r "${KUBECONFIG_FILE}" ]]; then
   echo "kubeconfig file '${KUBECONFIG_FILE}' is missing"
@@ -39,6 +43,7 @@ data:
   AWS_ACCESS_KEY_ID: $(echo -n "${AWS_ACCESS_KEY_ID}" | base64 -w 0)
   AWS_SECRET_ACCESS_KEY: $(echo -n "${AWS_SECRET_ACCESS_KEY}" | base64 -w 0)
   kubeconfig: $(cat "${KUBECONFIG_FILE}" | base64 -w 0)
+  ${S3_SECRET_ITEM}
 END
 
 done

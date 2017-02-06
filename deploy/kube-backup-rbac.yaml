@@ -6,17 +6,19 @@ metadata:
     app: kube-backup
     env: system
 rules:
-  - apiGroups: ["*"]
-    resources: ["pods"]
-    verbs: ["get","list","proxy"]
-  - apiGroups: ["*"]
-    resources: ["secrets"]
-    verbs: ["get"]
+# More restricted permissions always seem to block 'exec'
 #  - apiGroups: ["*"]
-#    resources: ["*"]
+#    resources: ["pods"]
 #    verbs: ["*"]
-#  - nonResourceURLs: ["*"]
-#    verbs: ["*"]  
+#    verbs: ["get","list","proxy"]
+#  - apiGroups: ["*"]
+#    resources: ["secrets"]
+#    verbs: ["get"]
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]
+  - nonResourceURLs: ["*"]
+    verbs: ["*"]  
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1alpha1
@@ -29,6 +31,8 @@ subjects:
   - kind: ServiceAccount
     namespace: kube-backup
     name: default
+  - kind: User
+    name: kube-backup
 roleRef:
   kind: ClusterRole
   name: kube-backup

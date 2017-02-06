@@ -218,12 +218,12 @@ send_slack_message ()
 }
 SLACKEND
 
-  echo "${body}" | curl -X POST -H 'Content-type: application/json' --data @- $SLACK_WEBHOOK
+  local response=$(echo "${body}" | curl -Ss -X POST -H 'Content-type: application/json' --data @- $SLACK_WEBHOOK)
 
   if [[ "$?" -eq 0 ]]; then
     echo "Sent message to Slack: '$message'"
   else
-    echo "Error sending message to Slack: '$message'"
+    echo "Error sending message to Slack: '$response'"
   fi
 }
 
@@ -432,7 +432,7 @@ case $TASK in
   backup-mysql-exec)
     backup_mysql_exec
   ;;
-  slack-test)
+  test-slack)
     send_slack_message "Hello world" warning
   ;;
   dump-env)
