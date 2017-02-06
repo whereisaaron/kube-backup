@@ -116,8 +116,8 @@ get_aws_secret ()
 
   local secrets=($($KUBECTL get secret ${secret_name} -o jsonpath='{.data.AWS_ACCESS_KEY_ID} {.data.AWS_SECRET_ACCESS_KEY}'))
   if [[ "$?" -eq 0 ]]; then
-    export AWS_ACCESS_KEY_ID=$(echo "$secrets[1]}" | $BASE64 -d)
-    export AWS_SECRET_ACCESS_KEY=$(echo "$secrets[2]}" | $BASE64 -d)
+    export AWS_ACCESS_KEY_ID=$(echo "${secrets[1]}" | $BASE64 -d)
+    export AWS_SECRET_ACCESS_KEY=$(echo "${secrets[2]}" | $BASE64 -d)
     echo "Fetched AWS credientials from '$secret_name' secret"
   else
     echo "Failed to load AWS credentials from '$secret_name' secret"
