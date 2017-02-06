@@ -97,7 +97,7 @@ check_for_aws_secret ()
   local secret_name=$1
 
   if [[ -z ${AWS_ACCESS_KEY_ID} ]]; then
-    get aws_secret $secret_name || return 1
+    get_aws_secret $secret_name || return 1
   fi
 }
 
@@ -127,7 +127,7 @@ check_for_slack_secret ()
   local secret_name=$1
 
   if [[ -z ${SLACK_WEBHOOK} ]]; then
-    get aws_secret $secret_name || return 1
+    get_slack_secret $secret_name || return 1
   fi
 }
 
@@ -141,7 +141,7 @@ send_slack_message ()
   : ${color:='good'}
 
   local body
-  read -r -d '' fancy_body <<SLACKEND
+  read -r -d '' body <<SLACKEND
 {
   "attachments": [
     {
@@ -315,16 +315,19 @@ check_for_slack_secret $SLACK_SECRET
 
 # Work out the target namespace
 if [[ -z "${NAMESPACE}" ]]; then
-  NAMESPACE=$($KUBECTL config view --minify -o jsonpath="{.contexts[0].context.namespace}")
+  NAMESPACE=$($KUBECTL config view --minify -o jsonpath="{.contexts[0].context.namespace} 2&> /dev/null")
   if [[ -z "${NAMESPACE}" ]]; then
-    echo "No namespace specified and no current kubectl context, assuming 'default' namespace"
-    NAMESPACE=default
+    echo "No task namespace specified"
   fi
 fi
 
 # Create namespace argument is a namespace has been specified
 # Otherwise the current namespace will be used (which is not necessarily 'default')
-NS_ARG=${NAMESPACE+--namespace=$NAMESPACE}
+if [[ -n "${NAMESPACE}" ]]; then
+  NS_ARG=${NAMESPACE+--namespace=$NAMESPACE}
+else
+  NZ_ARG=""
+fi
 
 # Default timestamp for backups
 # Setting this in environment or argument allows for multiple backups to be synchronized
