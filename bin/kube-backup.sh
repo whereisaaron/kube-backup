@@ -2,6 +2,7 @@
 #
 # kube-backup.sh
 # Various strategies to back-up the contents of containers running on a Kubernetes cluster.
+# Uses kubectl against the Kubernetes API. Can be use internal or external to a cluster.
 # Aaron Roydhouse <aaron@roydhouse.com>, 2017
 #
 # Exit values
@@ -40,7 +41,6 @@ display_version ()
   echo "${script_name} version ${VERSION}"
 }
 
-
 # Check for essential tools
 check_tools ()
 {
@@ -51,6 +51,16 @@ check_tools ()
     fi
   done
 }
+
+array_contains () {
+  local a
+  for a in "${@:2}"; do [[ "$a" == "$1" ]] && return 0; done
+  return 1
+}
+
+#======================================================================
+# Find containers
+#
 
 # Check a container exists
 check_container ()
@@ -96,11 +106,9 @@ check_container ()
   fi
 }
 
-array_contains () {
-  local a
-  for a in "${@:2}"; do [[ "$a" == "$1" ]] && return 0; done
-  return 1
-}
+#======================================================================
+# Kubernetes secrets
+#
 
 get_kubeconfig_secret ()
 {
@@ -127,6 +135,10 @@ get_kubeconfig_secret ()
     exit 2 
   fi
 }
+
+#======================================================================
+# AWS Secrets
+#
 
 # Get AWS key and secret from a Kubernetes secret 
 # Only in the current namespace
@@ -190,6 +202,10 @@ check_for_s3_secret ()
   fi
 }
 
+#======================================================================
+# Slack support
+#
+
 # Get Slack webhook URL from a Kubernetes secret 
 # Only looks only in the current namespace
 get_slack_secret ()
@@ -252,7 +268,34 @@ SLACKEND
   fi
 }
 
+#======================================================================
+# Filenames
 #
+
+create_filename ()
+{
+  local pod=$1 container=$2 backup_name=$3 timestamp=$4 ext=$5
+
+  # Have a go at removing the suffix that a Deployment and ReplicaSet adds
+  local clean_pod="$(echo ${pod} | sed -e 's/-[0-9]\+-[a-z0-9]\+$//')"
+
+  # Join all non-empty parts
+  local filename="${clean_pod}"
+  for part in "${container}" "${backup_name}" "${timestamp}"; do
+    local clean_part="$(echo ${part} | sed -e 's/[^A-Za-z0-9_-]/_/g' -e 's/__+/_/g' -e 's/^[-_]\+//' -e 's/[-_]$\+//')"
+    if [[ -n "${clean_part}" ]]; then
+      # If the previous part ends with this part, skip adding (e.g. if pod='foo-website' and container='website')
+      if [[ ! "$filename" =~ -${clean_part}$ ]]; then
+        filename="${filename}-${clean_part}"
+      fi
+    fi
+  done
+
+  local filename="${filename}${ext}"
+  echo "${filename}"
+}
+
+#======================================================================
 # Backup tasks
 #
 
@@ -281,13 +324,7 @@ backup_mysql_exec ()
     exit 3
   fi
 
-  if [[ -z "${BACKUP_NAME}" ]]; then
-    local file_prefix="$(echo ${DATABASE} | sed -e 's/[^A-Za-z0-9_-]/_/g' | sed -e 's/^_\+//')-mysql"
-  else
-    local file_prefix="$(echo ${BACKUP_NAME} | sed -e 's/[^A-Za-z0-9_-]/_/g' | sed -e 's/^_\+//')"
-  fi
-  
-  local backup_filename="${file_prefix}-${TIMESTAMP}.gz"
+  local backup_filename=$(create_filename "${POD}" "${CONTAINER}" "${BACKUP_NAME:-$DATABASE}" "${TIMESTAMP}" ".gz")
   local backup_cmd="mysqldump '${DATABASE}' --user=\"\${MYSQL_USER}\" --password=\"\${MYSQL_PASSWORD}\" --single-transaction | gzip"
 
   BACKUP_PATH="${NAMESPACE-default}/${TIMESTAMP}"
@@ -339,13 +376,7 @@ backup_files_exec ()
     exit 3
   fi
 
-  if [[ -z "${BACKUP_NAME}" ]]; then
-    local file_prefix="$(echo ${FILES_PATH} | sed -e 's/[^A-Za-z0-9_-]/_/g' | sed -e 's/^_\+//')-files"
-  else
-    local file_prefix="$(echo ${BACKUP_NAME} | sed -e 's/[^A-Za-z0-9_-]/_/g' | sed -e 's/^_\+//')"
-  fi
-
-  local backup_filename="${file_prefix}-${TIMESTAMP}.gz"
+  local backup_filename=$(create_filename "${POD}" "${CONTAINER}" "${BACKUP_NAME:-$FILES_PATH}" "${TIMESTAMP}" ".tar.gz")
   local backup_cmd="tar czf - '${FILES_PATH}'"
 
   BACKUP_PATH="${NAMESPACE-default}/${TIMESTAMP}"
@@ -377,8 +408,7 @@ backup_files_exec ()
   fi
 }
 
-
-#
+#======================================================================
 # Parse options
 #
 
@@ -467,7 +497,7 @@ case $i in
 esac
 done
 
-#
+#======================================================================
 # Check options and environment
 #
 
@@ -481,7 +511,7 @@ fi
 : ${AWSCLI:=aws}
 : ${ENVSUBST:=envsubst}
 : ${BASE64:=base64}
-check_tools $KUBECTL $AWSCLI $ENVSUBST $BASE64
+check_tools $KUBECTL $AWSCLI $ENVSUBST $BASE64 sed basename
 
 # Default secret name is 'kube-backup' in the same namespace
 # This is the default secret for all other secrets
@@ -520,7 +550,10 @@ fi
 # Setting this in environment or argument allows for multiple backups to be synchronized
 : ${TIMESTAMP:=$(date +%Y%m%d-%H%M)}
 
+#======================================================================
 # Run task
+#
+
 case $TASK in
   backup-mysql-exec)
     backup_mysql_exec
