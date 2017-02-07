@@ -87,7 +87,7 @@ check_container ()
     return 3
   fi
 
-  local containers=($($KUBECTL get pod $pod -o jsonpath='{.spec.containers[*].name}' 2> /dev/null))
+  local containers=($($KUBECTL get pod $pod $NS_ARG -o jsonpath='{.spec.containers[*].name}' 2> /dev/null))
   if [[ "$?" -eq 0 ]]; then
     if [[ "${#containers[@]}" -gt 0 ]]; then
       echo "Pod '$pod' has ${#containers[@]} containers: ${containers[@]}"
@@ -104,16 +104,16 @@ check_container ()
           echo "Specified container '${container}' found in pod '${pod}'"
         fi
       fi
+      # Check the identified pod is ready
+      if [[ "true" != $($KUBECTL get pod $pod $NS_ARG -o jsonpath="{.status.containerStatuses[?(@.name == \"${container}\")].ready}") ]]; then
+        echo "Container '${container}' in pod '${pod}' is not ready"
+        return 3
+      fi
     else
       echo "Pod '${pod}' has no containers"
     fi
   else
     echo "Pod '${pod}' not found"
-    return 3
-  fi
-
-  if [[ "true" != $($KUBECTL get pod $pod $NS_ARG -o jsonpath="{.status.containerStatuses[?(@.name == \"${container}\")].ready}") ]]; then
-    echo "Container '${container}' in pod '${pod}' is not ready"
     return 3
   fi
 }
@@ -611,7 +611,7 @@ if [[ -n "$SELECTOR" ]]; then
   fi
 
   PODS=""
-  find_pods_with_selector "$SELECTOR" "${NAMESPACE}" PODS
+  find_pods_with_selector "${SELECTOR}" "${NAMESPACE}" PODS
   if [[ "$?" -ne 0 ]]; then
     exit $?
   fi
