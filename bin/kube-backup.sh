@@ -8,7 +8,7 @@
 # Exit values
 # - Success: 0
 # - Task failed: 1
-# - Error occured: 2
+# - Error occurred: 2
 # - Missing dependancy: 3
 #
 
@@ -73,6 +73,8 @@ array_contains () {
 #
 
 # Check a container exists
+# Pass the names of the global pod and container variables
+# Will update the container variable is empty
 check_container ()
 {
   local pod_var=$1 container_var=$2
@@ -114,6 +116,33 @@ check_container ()
     echo "Container '${container}' in pod '${pod}' is not ready"
     return 3
   fi
+}
+
+# Find all pods matching a selector
+# Returns pod names in pods_var
+find_pods_with_selector ()
+{
+  local selector=$1 namespace=$2 pods_var=$3
+
+  if [[ -n "${namespace}" ]]; then
+    local ns_arg="--namespace=${namespace}"
+  else
+    local ns_arg=""
+  fi
+
+  local pods=($(kubectl get pod --selector=${selector} $ns_arg -o jsonpath='{.items[*].metadata.name}'))
+  if [[ "$?" -eq 0 ]]; then
+    if [[ "${#pods[@]}" -gt 0 ]]; then
+      echo "Selector '$selector' matched ${#pods[@]} pods: ${pods[@]}"
+    else
+      echo "The selector '$selector' matched no pods"
+    fi
+  else
+    echo "Error finding pods with selector '$selector'"
+    return 1
+  fi
+
+  eval "${pods_var}=\"${pods[@]}\""
 }
 
 #======================================================================
@@ -309,6 +338,10 @@ create_filename ()
 # Backup tasks
 #
 
+# This strategy relies on kubectl exec into the offical or derivative MySQL container
+# Requires environment variables in container: MYSQL_USER MYSQL_PASSWORD MYSQL_DATABASE
+# Requires tools in container: bash mysqldump gzip
+#
 backup_mysql_exec ()
 {
   check_container 'POD' 'CONTAINER'
@@ -366,6 +399,9 @@ backup_mysql_exec ()
   fi
 }
 
+# This strategy relies on kubectl exec into the container
+# Requires tools in container: tar gzip
+#
 backup_files_exec ()
 {
   check_container 'POD' 'CONTAINER'
@@ -435,6 +471,10 @@ case $i in
   ;;
   --pod=*)
   POD="${i#*=}"
+  shift # past argument=value
+  ;;
+  --selector=*)
+  SELECTOR="${i#*=}"
   shift # past argument=value
   ;;
   --container=*)
@@ -553,12 +593,41 @@ fi
 if [[ -n "${NAMESPACE}" ]]; then
   NS_ARG=${NAMESPACE+--namespace=$NAMESPACE}
 else
-  NZ_ARG=""
+  NS_ARG=""
 fi
 
 # Default timestamp for backups
 # Setting this in environment or argument allows for multiple backups to be synchronized
 : ${TIMESTAMP:=$(date +%Y%m%d-%H%M)}
+
+#======================================================================
+# Find pods for tasks
+#
+
+if [[ -n "$SELECTOR" ]]; then
+  if [[ -n "$POD" ]]; then
+    echo "Can only specify a pod name or a selector"
+    exit 3
+  fi
+
+  PODS=""
+  find_pods_with_selector "$SELECTOR" "${NAMESPACE}" PODS
+  if [[ "$?" -ne 0 ]]; then
+    exit $?
+  fi
+  
+  POD_ARRAY=($PODS)
+  if [[ "${#POD_ARRAY[@]}" -eq 1 ]]; then
+    POD="${POD_ARRAY[0]}"
+  else
+    if [[ "${#POD_ARRAY[@]}" -gt 1 ]]; then
+      echo "Selector matched multiple pods, must match only one pod or specify pod name"
+      exit 2
+    else
+      echo "Skipping task, no pods found with selector"
+    fi
+  fi
+fi
 
 #======================================================================
 # Run task
