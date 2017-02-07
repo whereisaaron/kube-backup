@@ -21,18 +21,28 @@ VERSION=0.1
 display_usage ()
 {
   local script_name="$(basename $0)"
-  echo "Usage:"
-  echo "  ${script_name} --task=<task name> [options...]"
-  echo "  ${script_name} --task=backup-mysql-exec [--database=<db name>] [options...]"
-  echo "  ${script_name} --task=backup-files-exec [--files-path=<files path>] [options...]"
-  echo "    [--pod=<pod-name> --container=<container-name>] [--secret=<secret name>]" 
-  echo "    [--s3-bucket=<bucket name>] [--s3-prefix=<prefix>] [--aws-secret=<secret name>]"
-  echo "    [--use-kubeconfig-from-secret|--kubeconfig-secret=<secret name>]"
-  echo "    [--slack-secret=<secret name>]"
-  echo "    [--timestamp=<timestamp>] [--backup-name=<backup name>]"
-  echo "    [--dry-run]"
-  echo "  ${script_name} --help"
-  echo "  ${script_name} --version"
+  cat <<END
+Usage:
+  ${script_name} --task=<task name> [options...]
+  ${script_name} --task=backup-mysql-exec [--database=<db name>] [options...]
+  ${script_name} --task=backup-files-exec [--files-path=<files path>] [options...]
+    [--pod=<pod-name>|--selector=<selector>] [--container=<container-name>] [--secret=<secret name>]
+    [--s3-bucket=<bucket name>] [--s3-prefix=<prefix>] [--aws-secret=<secret name>]
+    [--use-kubeconfig-from-secret|--kubeconfig-secret=<secret name>]
+    [--slack-secret=<secret name>]
+    [--timestamp=<timestamp>] [--backup-name=<backup name>]
+    [--dry-run]
+  ${script_name} --help
+  ${script_name} --version
+
+  --secret is the default secret for all secrets (kubeconfig, AWS, Slack) 
+  --timestamp allows two backups to share the same timestamp
+  --s3-bucket if not specified, will be taken from the AWS secret
+  --s3-prefix is inserted at the beginning of the S3 prefix
+  --backup-name will replace e.g. the database name or file path
+  --dry-run will do everything except the actual backup
+
+END
 }
 
 display_version ()
