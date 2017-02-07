@@ -53,30 +53,53 @@ check_tools ()
 }
 
 # Check a container exists
-require_container ()
+check_container ()
 {
-  local pod=$1 container=$2
+  local pod_var=$1 container_var=$2
+  eval "local pod=\$${pod_var}"
+  eval "local container=\$${container_var}"
 
-  if [[ -z "${pod}" || -z "${container}" ]]; then
-    echo "Must specify a pod name and container name"
+  if [[ -z "${pod}" ]]; then
+    echo "Must specify a pod name"
     display_usage
-    exit 3
-  fi
-  
-  if [[ -z $($KUBECTL get pod $pod $NS_ARG -o jsonpath="{.metadata.name}" 2> /dev/null) ]]; then
-    echo "Pod '${pod}' not found"
-    exit 3
+    return 3
   fi
 
-  if [[ -z $($KUBECTL get pod $pod $NS_ARG -o jsonpath="{.spec.containers[?(@.name == \"${container}\")].name}") ]]; then
-    echo "Container '${container}' not found in pod '${pod}'"
-    exit 3
+  local containers=($($KUBECTL get pod $pod -o jsonpath='{.spec.containers[*].name}' 2> /dev/null))
+  if [[ "$?" -eq 0 ]]; then
+    if [[ "${#containers[@]}" -gt 0 ]]; then
+      echo "Pod '$pod' has ${#containers[@]} containers: ${containers[@]}"
+      if [[ -z "$container" ]]; then
+        echo "No container specified, using the first container in pod '${pod}': ${containers[0]}"
+        container="${containers[0]}"
+        eval "${container_var}=$container"
+      else
+        array_contains $container "${containers[@]}"
+        if [[ "$?" -ne 0 ]]; then
+          echo "Container '${container}' not found in pod '${pod}'"
+          return 3
+        else
+          echo "Specified container '${container}' found in pod '${pod}'"
+        fi
+      fi
+    else
+      echo "Pod '${pod}' has no containers"
+    fi
+  else
+    echo "Pod '${pod}' not found"
+    return 3
   fi
 
   if [[ "true" != $($KUBECTL get pod $pod $NS_ARG -o jsonpath="{.status.containerStatuses[?(@.name == \"${container}\")].ready}") ]]; then
     echo "Container '${container}' in pod '${pod}' is not ready"
-    exit 3
+    return 3
   fi
+}
+
+array_contains () {
+  local a
+  for a in "${@:2}"; do [[ "$a" == "$1" ]] && return 0; done
+  return 1
 }
 
 get_kubeconfig_secret ()
@@ -235,7 +258,11 @@ SLACKEND
 
 backup_mysql_exec ()
 {
-  require_container $POD $CONTAINER
+  check_container 'POD' 'CONTAINER'
+  if [[ "$?" -ne 0 ]]; then
+    echo "Aborting backup, no container selected"
+    exit $?
+  fi
 
   check_for_s3_secret $AWS_SECRET
   if [[ -n "$S3_BUCKET" ]]; then
@@ -245,12 +272,12 @@ backup_mysql_exec ()
   local cmd="${KUBECTL} exec -i ${POD} --container=${CONTAINER} ${NS_ARG} --"
 
   if [[ -z "${DATABASE}" ]]; then
-    echo "No database specified, getting database name from container environment"
+    echo "No database specified, getting database name from environment of container '$CONTAINER'"
     DATABASE=$($cmd bash -c "echo \"\${MYSQL_DATABASE}\"")
   fi 
 
   if [[ -z "${DATABASE}" ]]; then
-    echo "No database name specified"
+    echo "No database name specified or found"
     exit 3
   fi
 
@@ -294,7 +321,11 @@ backup_mysql_exec ()
 
 backup_files_exec ()
 {
-  require_container $POD $CONTAINER
+  check_container 'POD' 'CONTAINER'
+  if [[ "$?" -ne 0 ]]; then
+    echo "Aborting backup, no container selected"
+    exit $?
+  fi
 
   check_for_s3_secret $AWS_SECRET
   if [[ -n "$S3_BUCKET" ]]; then
