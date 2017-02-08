@@ -20,15 +20,21 @@ for an example deployment.
 
 Back up a files using `tar` in a container. It assumes `bash`, `tar`, and `gzip` is available.
 ```
-kubectl run --attach --retart=Never --rm kube-backup --image whereisaaron/kube-backup:0.1.2 -- \
+kubectl run --attach --rm --retart=Never kube-backup --image whereisaaron/kube-backup:0.1.2 -- \
  --task=backup-files-exec --namespace=default --pod=my-pod --container=website --files-path=/var/www
 ```
 
 Back up a database using `mysqldump` run in the MySQL container. It assumes the environment variables
 based on the [offical MySQL container images](https://hub.docker.com/_/mysql/) and that `gzip` is available.
 ```
-kubectl run --attach --restart=Never --rm kube-backup --image whereisaaron/kube-backup:0.1.2 -- \
+kubectl run --attach --rm --restart=Never kube-backup --image whereisaaron/kube-backup:0.1.2 -- \
  --task=backup-mysql-exec --namespace=default --pod=my-pod --container=mysql
+```
+
+You could also schedule a backup to run daily.
+```
+kubectl run --schedule='@daily' --retart=Never kube-backup --image whereisaaron/kube-backup:0.1.2 -- \
+ --task=backup-files-exec --namespace=default --pod=my-pod --container=website --files-path=/var/www
 ```
 
 ## Usage
@@ -51,7 +57,7 @@ Usage:
   kube-backup.sh --version
 
 Notes:
-  --secret is the default secret for all secrets (kubeconfig, AWS, Slack) 
+  --secret defaults to 'kube-backup' and is the default secret for kubeconfig, aws, and slack
   --timestamp allows two backups to share the same timestamp
   --s3-bucket if not specified, will be taken from the AWS secret
   --s3-prefix is inserted at the beginning of the S3 prefix
@@ -95,4 +101,32 @@ $CMD $(run_name) -- $EXTRA_OPTS \
   --selector=app=myapp,env=dev,component=website \
   --files-path=/var/www/assets \
   --backup-name=assets
+```
+
+## Create backup task using a YAML file
+
+You could also create backup jobs using a YAML or JSON file.
+
+```
+kubectl create -f backup-website.yaml
+```
+
+### backup-website.yaml
+```
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kb-task
+  namespace: kube-backup
+spec:
+  containers:
+  - args:
+    - --task=backup-files-exec
+    - --namespace=default
+    - --selector=app=my-app,env=dev,component=website
+    - --files-path=/var/www/assets
+    - --backup-name=assets
+    image: whereisaaron/kube-backup:0.1.2
+    name: kb-task
+  restartPolicy: Never
 ```

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kb-task
+  namespace: kube-backup
+spec:
+  containers:
+  - args:
+    - --task=backup-files-exec
+    - --namespace=default
+    - --selector=app=my-app,env=dev,component=website
+    - --files-path=/var/www/assets
+    - --backup-name=assets
+    image: whereisaaron/kube-backup:0.1.2
+    name: kb-task
+  restartPolicy: Never

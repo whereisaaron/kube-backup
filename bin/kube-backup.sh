@@ -36,7 +36,7 @@ Usage:
   ${script_name} --version
 
 Notes:
-  --secret is the default secret for all secrets (kubeconfig, AWS, Slack) 
+  --secret defaults to 'kube-backup' and is the default secret for kubeconfig, aws, and slack
   --timestamp allows two backups to share the same timestamp
   --s3-bucket if not specified, will be taken from the AWS secret
   --s3-prefix is inserted at the beginning of the S3 prefix

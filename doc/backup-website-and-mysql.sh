@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 #
 # Backup MySQL database and website files
@@ -8,11 +9,12 @@
 
 TIMESTAMP=$(date +%Y%m%d-%H%M)
 run_name () { 
-  echo "kb-$(cat /dev/urandom | tr -dc 'a-z0-9' | head -c 4)" 
+  echo "kb-task-$(cat /dev/urandom | tr -dc 'a-z0-9' | head -c 4)" 
 }
 #EXTRA_OPTS='--dry-run'
 
-CMD='kubectl run --attach --restart=Never --rm --image=whereisaaron/kube-backup:0.1.2 --namespace=kube-backup'
+# The '--attach --rm' allows us to block until completion, you could remove that not wait for completion
+CMD='kubectl run --attach --rm --quiet --restart=Never --image=whereisaaron/kube-backup:0.1.2 --namespace=kube-backup'
 
 $CMD $(run_name) -- $EXTRA_OPTS \
   --task=backup-mysql-exec \
