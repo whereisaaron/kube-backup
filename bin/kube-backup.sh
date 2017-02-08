@@ -301,9 +301,7 @@ SLACKEND
 
   local response=$(echo "${body}" | curl -Ss -X POST -H 'Content-type: application/json' --data @- $SLACK_WEBHOOK)
 
-  if [[ "$?" -eq 0 ]]; then
-    echo "Sent message to Slack: '$message'"
-  else
+  if [[ "$?" -ne 0 ]]; then
     echo "Error sending message to Slack: '$response'"
   fi
 }
@@ -379,7 +377,9 @@ backup_mysql_exec ()
     if [[ "${DRY_RUN}" != "true" ]]; then
       $cmd bash -c "${backup_cmd}" | ${AWSCLI} s3 cp - "${target}"
       if [[ "$?" -eq 0 ]];then
-        send_slack_message "Backed up MySQL database '${DATABASE}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
+        local msg="Backed up MySQL database '${DATABASE}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
+        send_slack_message "$msg"
+        echo "$msg"
       else
         local msg="Error: Failed to back up MySQL database '${DATABASE}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
         send_slack_message "$msg" danger 

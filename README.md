@@ -1,15 +1,15 @@
 # kube-backup
 
-Utility container for Kubernetes to backup databases and files from other containers. Currently
-it can use `kubectl exec` to backup database and files form within containers and store the 
+Utility container to backup databases and files from containers in a Kubernetes cluster. Currently
+it can use `kubectl exec` to backup database and files from within containers and store the 
 backup files in an AWS S3 bucket.
 
-Docker/Kubernetes images Available on [Docker Hub](https://hub.docker.com/r/whereisaaron/kube-backup/).
+Docker images are available on [Docker Hub](https://hub.docker.com/r/whereisaaron/kube-backup/).
 
 Source code is available on [Github](https://github.com/whereisaaron/kube-backup). Please
 make comments and contribute improvements on Github.
 
-*This is an early prototype, test with care and please report issues or contribute improvements*
+*This is an early prototype, test with care and please report issues or contribute improvements on Github*
 
 ## Example use cases
 
@@ -20,14 +20,14 @@ for an example deployment.
 
 Back up a files using `tar` in a container. It assumes `bash`, `tar`, and `gzip` is available.
 ```
-kubectl run --attach --rm kube-backup --image whereisaaron/kube-backup:0.1.1 -- \
+kubectl run --attach --retart=Never --rm kube-backup --image whereisaaron/kube-backup:0.1.2 -- \
  --task=backup-files-exec --namespace=default --pod=my-pod --container=website --files-path=/var/www
 ```
 
 Back up a database using `mysqldump` run in the MySQL container. It assumes the environment variables
-based on the [offical MySQL container images](https://hub.docker.com/_/mysql/) and `gzip` is available.
+based on the [offical MySQL container images](https://hub.docker.com/_/mysql/) and that `gzip` is available.
 ```
-kubectl run --attach --rm kube-backup --image whereisaaron/kube-backup:0.1.1 -- \
+kubectl run --attach --restart=Never --rm kube-backup --image whereisaaron/kube-backup:0.1.2 -- \
  --task=backup-mysql-exec --namespace=default --pod=my-pod --container=mysql
 ```
 
@@ -80,7 +80,7 @@ run_name () {
 }
 #EXTRA_OPTS='--dry-run'
 
-CMD='kubectl run --attach --rm --image=whereisaaron/kube-backup:0.1.1 --namespace=kube-backup'
+CMD='kubectl run --attach --restart=Never --rm --image=whereisaaron/kube-backup:0.1.2 --namespace=kube-backup'
 
 $CMD $(run_name) -- $EXTRA_OPTS \
   --task=backup-mysql-exec \

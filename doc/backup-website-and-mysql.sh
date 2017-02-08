@@ -12,7 +12,7 @@ run_name () {
 }
 #EXTRA_OPTS='--dry-run'
 
-CMD='kubectl run --attach --rm --image=whereisaaron/kube-backup:0.1.1 --namespace=kube-backup'
+CMD='kubectl run --attach --restart=Never --rm --image=whereisaaron/kube-backup:0.1.2 --namespace=kube-backup'
 
 $CMD $(run_name) -- $EXTRA_OPTS \
   --task=backup-mysql-exec \
