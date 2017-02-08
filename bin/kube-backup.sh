@@ -35,6 +35,7 @@ Usage:
   ${script_name} --help
   ${script_name} --version
 
+Notes:
   --secret is the default secret for all secrets (kubeconfig, AWS, Slack) 
   --timestamp allows two backups to share the same timestamp
   --s3-bucket if not specified, will be taken from the AWS secret
