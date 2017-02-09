@@ -11,6 +11,6 @@ spec:
     - --selector=app=my-app,env=dev,component=website
     - --files-path=/var/www/assets
     - --backup-name=assets
-    image: whereisaaron/kube-backup:0.1.2
+    image: whereisaaron/kube-backup:0.1.3
     name: kb-task
   restartPolicy: Never

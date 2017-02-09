@@ -15,7 +15,7 @@ function Run-Name () {
 #$ExtraOpts = '--dry-run'
 
 # The '--attach --rm' allows us to block until completion, you could remove that not wait for completion
-$Command = 'kubectl run --attach --rm --quiet --restart=Never --image=whereisaaron/kube-backup:0.1.2 --namespace=kube-backup'
+$Command = 'kubectl run --attach --rm --quiet --restart=Never --image=whereisaaron/kube-backup:0.1.3 --namespace=kube-backup'
 
 Invoke-Expression "$Command $(Run-Name) -- $ExtraOpts --task=backup-mysql-exec --timestamp=$Timestamp --namespace=default '--selector=app=myapp,env=dev,component=mysql'"
 if ($LASTEXITCODE -ne 0) { Exit $LASTEXITCODE }

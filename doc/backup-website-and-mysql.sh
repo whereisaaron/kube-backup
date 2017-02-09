@@ -14,7 +14,7 @@ run_name () {
 #EXTRA_OPTS='--dry-run'
 
 # The '--attach --rm' allows us to block until completion, you could remove that not wait for completion
-CMD='kubectl run --attach --rm --quiet --restart=Never --image=whereisaaron/kube-backup:0.1.2 --namespace=kube-backup'
+CMD='kubectl run --attach --rm --quiet --restart=Never --image=whereisaaron/kube-backup:0.1.3 --namespace=kube-backup'
 
 $CMD $(run_name) -- $EXTRA_OPTS \
   --task=backup-mysql-exec \
