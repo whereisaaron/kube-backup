@@ -306,6 +306,13 @@ SLACKEND
   fi
 }
 
+send_slack_message_and_echo ()
+{
+  send_slack_message "$@"
+  echo $1
+}
+
+
 #======================================================================
 # Filenames
 #
@@ -367,7 +374,7 @@ backup_mysql_exec ()
   fi
 
   local backup_filename=$(create_filename "${POD}" "${CONTAINER}" "${BACKUP_NAME:-$DATABASE}" "${TIMESTAMP}" ".gz")
-  local backup_cmd="mysqldump '${DATABASE}' --user=\"\${MYSQL_USER}\" --password=\"\${MYSQL_PASSWORD}\" --single-transaction | gzip"
+  local backup_cmd="MYSQL_PWD=\"\${MYSQL_PASSWORD}\" mysqldump '${DATABASE}' --user=\"\${MYSQL_USER}\" --single-transaction | gzip"
 
   BACKUP_PATH="${NAMESPACE-default}/${TIMESTAMP}"
   if [[ -n "${S3_BUCKET}" ]]; then
@@ -377,13 +384,9 @@ backup_mysql_exec ()
     if [[ "${DRY_RUN}" != "true" ]]; then
       $cmd bash -c "${backup_cmd}" | ${AWSCLI} s3 cp - "${target}"
       if [[ "$?" -eq 0 ]];then
-        local msg="Backed up MySQL database '${DATABASE}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
-        send_slack_message "$msg"
-        echo "$msg"
+        send_slack_message_and_echo "Backed up MySQL database '${DATABASE}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
       else
-        local msg="Error: Failed to back up MySQL database '${DATABASE}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
-        send_slack_message "$msg" danger 
-        echo "$msg"
+        send_slack_message_and_echo "Error: Failed to back up MySQL database '${DATABASE}' from container '${CONTAINER}' in pod '${POD}' to '${target}'" danger
       fi
     else
       echo "Skipping backup, dry run delected"
@@ -434,11 +437,9 @@ backup_files_exec ()
     if [[ "${DRY_RUN}" != "true" ]]; then
       $cmd bash -c "${backup_cmd}" | ${AWSCLI} s3 cp - "${target}"
       if [[ "$?" -eq 0 ]];then
-        send_slack_message "Backed up files in '${FILES_PATH}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
+        send_slack_message_and_echo "Backed up files in '${FILES_PATH}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
       else
-        local msg="Error: Failed to back up files in '${FILES_PATH}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
-        send_slack_message "$msg" danger 
-        echo "$msg"
+        send_slack_message_and_echo "Error: Failed to back up files in '${FILES_PATH}' from container '${CONTAINER}' in pod '${POD}' to '${target}'" danger
       fi
     else
       echo "Skipping backup, dry run delected"
@@ -642,7 +643,7 @@ case $TASK in
     backup_files_exec
   ;;
   test-slack)
-    send_slack_message "Hello world" warning
+    send_slack_message_and_echo "Hello world" warning
   ;;
   dump-env)
     env
