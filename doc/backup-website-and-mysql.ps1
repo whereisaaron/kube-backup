@@ -5,7 +5,7 @@ $WarningPreference = "SilentlyContinue"
 #
 # Backup MySQL database and website files
 # - Use a synchronised timestamp so backups go into the same S3 directory
-# - Use randomised deployment names in case any old/stuck deployments exist
+# - Use randomised job/pod names in case any concurrent or completed pods exist
 #
 
 $Timestamp = $(Get-Date -f yyyyMMdd-hhmm)

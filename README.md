@@ -9,8 +9,6 @@ Docker images are available on [Docker Hub](https://hub.docker.com/r/whereisaaro
 Source code is available on [Github](https://github.com/whereisaaron/kube-backup). Please
 make comments and contribute improvements on Github.
 
-*This is an early prototype, test with care and please report issues or contribute improvements on Github*
-
 ## Example use cases
 
 These examples assume you have created a `kube-backup` Secret with AWS credentials and an
@@ -20,7 +18,7 @@ for an example deployment.
 
 Back up a files using `tar` in a container. It assumes `bash`, `tar`, and `gzip` is available.
 ```
-kubectl run --attach --rm --retart=Never kube-backup --image whereisaaron/kube-backup:0.1.3 -- \
+kubectl run --attach --rm --restart=Never kube-backup --image whereisaaron/kube-backup:0.1.3 -- \
  --task=backup-files-exec --namespace=default --pod=my-pod --container=website --files-path=/var/www
 ```
 
@@ -33,7 +31,7 @@ kubectl run --attach --rm --restart=Never kube-backup --image whereisaaron/kube-
 
 You could also schedule a backup to run daily.
 ```
-kubectl run --schedule='@daily' --retart=Never kube-backup --image whereisaaron/kube-backup:0.1.3 -- \
+kubectl run --schedule='@daily' --restart=Never kube-backup --image whereisaaron/kube-backup:0.1.3 -- \
  --task=backup-files-exec --namespace=default --pod=my-pod --container=website --files-path=/var/www
 ```
 
