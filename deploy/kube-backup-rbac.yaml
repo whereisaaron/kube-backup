@@ -6,19 +6,15 @@ metadata:
     app: kube-backup
     env: system
 rules:
-# More restricted permissions always seem to block 'exec'
-#  - apiGroups: ["*"]
-#    resources: ["pods"]
-#    verbs: ["*"]
-#    verbs: ["get","list","proxy"]
-#  - apiGroups: ["*"]
-#    resources: ["secrets"]
-#    verbs: ["get"]
-  - apiGroups: ["*"]
-    resources: ["*"]
-    verbs: ["*"]
-  - nonResourceURLs: ["*"]
-    verbs: ["*"]  
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get","list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1alpha1
