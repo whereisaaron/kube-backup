@@ -5,14 +5,21 @@
 # Uses kubectl against the Kubernetes API. Can be use internal or external to a cluster.
 # Aaron Roydhouse <aaron@roydhouse.com>, 2017
 #
-# Exit values
+# Sample usage:
+#   ./kube-backup.sh --task=backup-mysql-exec --selector=app=my-db,env=dev,component=mysql --container=mysql
+#   ./kube-backup.sh --task=backup-files-exec --pod=my-website --container=website --files-path=/var/www
+#
+# Exit values:
 # - Success: 0
 # - Task failed: 1
 # - Error occurred: 2
 # - Missing dependancy: 3
 #
 
-VERSION=0.1
+VERSION=0.1.4
+
+# Pipes have non-zero exit code if any step fail (rather than only the last)
+set -o pipefail
 
 #
 # Utility functions
@@ -86,6 +93,11 @@ check_container ()
     echo "Must specify a pod name"
     display_usage
     return 3
+  else
+    if [[ ! "$($KUBECTL get pod $pod $NS_ARG -o name)" ]]; then
+      echo "Pod '$pod' not found"
+      return 3
+    fi  
   fi
 
   local containers=($($KUBECTL get pod $pod $NS_ARG -o jsonpath='{.spec.containers[*].name}' 2> /dev/null))
@@ -112,6 +124,7 @@ check_container ()
       fi
     else
       echo "Pod '${pod}' has no containers"
+      return 3
     fi
   else
     echo "Pod '${pod}' not found"
@@ -353,13 +366,17 @@ backup_mysql_exec ()
   check_container 'POD' 'CONTAINER'
   if [[ "$?" -ne 0 ]]; then
     echo "Aborting backup, no container selected"
-    exit $?
+    exit 1
   fi
 
   check_for_s3_secret $AWS_SECRET
   if [[ -n "$S3_BUCKET" ]]; then
     check_for_aws_secret $AWS_SECRET
   fi
+
+  #
+  # Work out the database name
+  #
 
   local cmd="${KUBECTL} exec -i ${POD} --container=${CONTAINER} ${NS_ARG} --"
 
@@ -373,35 +390,50 @@ backup_mysql_exec ()
     exit 3
   fi
 
-  local backup_filename=$(create_filename "${POD}" "${CONTAINER}" "${BACKUP_NAME:-$DATABASE}" "${TIMESTAMP}" ".gz")
-  local backup_cmd="MYSQL_PWD=\"\${MYSQL_PASSWORD}\" mysqldump '${DATABASE}' --user=\"\${MYSQL_USER}\" --single-transaction | gzip"
+  #
+  # Work out the target path
+  #
 
-  BACKUP_PATH="${NAMESPACE-default}/${TIMESTAMP}"
+  local backup_path="${NAMESPACE-default}/${TIMESTAMP}"
+  local backup_filename=$(create_filename "${POD}" "${CONTAINER}" "${BACKUP_NAME:-$DATABASE}" "${TIMESTAMP}" ".gz")
   if [[ -n "${S3_BUCKET}" ]]; then
     [[ "$S3_PREFIX" =~ ^/*(.*[^/])/*$ ]] && local prefix=${BASH_REMATCH[1]}; prefix=${prefix}${prefix+/}
-    local target="s3://${S3_BUCKET}/${prefix}${BACKUP_PATH}/${backup_filename}"
-    echo "Backing up MySQL database '${DATABASE}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
-    if [[ "${DRY_RUN}" != "true" ]]; then
+    local target="s3://${S3_BUCKET}/${prefix}${backup_path}/${backup_filename}"
+    local use_s3="true"
+  else
+    local target="${backup_path}/${backup_filename}"
+    local use_s3="false"
+  fi
+
+  #
+  # Create and execute 'kubectl exec' backup command
+  #
+
+  local backup_cmd="MYSQL_PWD=\"\${MYSQL_PASSWORD}\" mysqldump '${DATABASE}' --user=\"\${MYSQL_USER}\" --single-transaction | gzip"
+  echo "Backing up MySQL database '${DATABASE}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
+  if [[ "${DRY_RUN}" != "true" ]]; then
+    if [[ "$use_s3" == "true" ]]; then
+      # relies on 'set -o pipefail' to detect kubectl errors
       $cmd bash -c "${backup_cmd}" | ${AWSCLI} s3 cp - "${target}"
-      if [[ "$?" -eq 0 ]];then
-        send_slack_message_and_echo "Backed up MySQL database '${DATABASE}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
-      else
-        send_slack_message_and_echo "Error: Failed to back up MySQL database '${DATABASE}' from container '${CONTAINER}' in pod '${POD}' to '${target}'" danger
-      fi
     else
-      echo "Skipping backup, dry run delected"
+      mkdir -p "${backup_path}"
+      $cmd bash -c "${backup_cmd}" > "${target}"
+    fi
+    if [[ "$?" -eq 0 ]];then
+      send_slack_message_and_echo "Backed up MySQL database '${DATABASE}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
+    else
+      send_slack_message_and_echo "Error: Failed to back up MySQL database '${DATABASE}' from container '${CONTAINER}' in pod '${POD}' to '${target}'" danger
     fi
   else
-    local target="${BACKUP_PATH}/${backup_filename}"
-    echo "Backing up MySQL database '${DATABASE}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
-    mkdir -p "${BACKUP_PATH}"
-    if [[ "${DRY_RUN}" != "true" ]]; then
-      $cmd bash -c "${backup_cmd}" > "${target}"
-    else
-      echo "Skipping backup, dry run delected"
-    fi
+    echo "Skipping backup, dry run delected"
   fi
 }
+
+#======================================================================
+# Backup or restore files using 'kubectl exec' proxy of tar output to S3
+# - backup_files_exec
+# - restore_files_exec
+#
 
 # This strategy relies on kubectl exec into the container
 # Requires tools in container: tar gzip
@@ -411,7 +443,7 @@ backup_files_exec ()
   check_container 'POD' 'CONTAINER'
   if [[ "$?" -ne 0 ]]; then
     echo "Aborting backup, no container selected"
-    exit $?
+    exit 1
   fi
 
   check_for_s3_secret $AWS_SECRET
@@ -419,40 +451,48 @@ backup_files_exec ()
     check_for_aws_secret $AWS_SECRET
   fi
 
-  local cmd="${KUBECTL} exec -i ${POD} --container=${CONTAINER} ${NS_ARG} --"
-
   if [[ -z "${FILES_PATH}" ]]; then
     echo "No backup path specified"
     exit 3
   fi
 
-  local backup_filename=$(create_filename "${POD}" "${CONTAINER}" "${BACKUP_NAME:-$FILES_PATH}" "${TIMESTAMP}" ".tar.gz")
-  local backup_cmd="tar czf - '${FILES_PATH}'"
+  #
+  # Work out the target path
+  #
 
-  BACKUP_PATH="${NAMESPACE-default}/${TIMESTAMP}"
+  local backup_path="${NAMESPACE-default}/${TIMESTAMP}"
+  local backup_filename=$(create_filename "${POD}" "${CONTAINER}" "${BACKUP_NAME:-$FILES_PATH}" "${TIMESTAMP}" ".tar.gz")
   if [[ -n "${S3_BUCKET}" ]]; then
     [[ "$S3_PREFIX" =~ ^/*(.*[^/])/*$ ]] && local prefix=${BASH_REMATCH[1]}; prefix=${prefix}${prefix+/}
-    local target="s3://${S3_BUCKET}/${prefix}${BACKUP_PATH}/${backup_filename}"
-    echo "Backing up files in '${FILES_PATH}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
-    if [[ "${DRY_RUN}" != "true" ]]; then
+    local target="s3://${S3_BUCKET}/${prefix}${backup_path}/${backup_filename}"
+    local use_s3="true"
+  else
+    local target="${backup_path}/${backup_filename}"
+    local use_s3="false"
+  fi
+
+  #
+  # Create and execute 'kubectl exec' backup command
+  #
+
+  local cmd="${KUBECTL} exec -i ${POD} --container=${CONTAINER} ${NS_ARG} --"
+  local backup_cmd="tar czf - '${FILES_PATH}'"
+  echo "Backing up files in '${FILES_PATH}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
+  if [[ "${DRY_RUN}" != "true" ]]; then
+    if [[ "$use_s3" == "true" ]]; then
+      # relies on 'set -o pipefail' to detect kubectl errors
       $cmd bash -c "${backup_cmd}" | ${AWSCLI} s3 cp - "${target}"
-      if [[ "$?" -eq 0 ]];then
-        send_slack_message_and_echo "Backed up files in '${FILES_PATH}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
-      else
-        send_slack_message_and_echo "Error: Failed to back up files in '${FILES_PATH}' from container '${CONTAINER}' in pod '${POD}' to '${target}'" danger
-      fi
     else
-      echo "Skipping backup, dry run delected"
+      mkdir -p "${backup_path}"
+      $cmd bash -c "${backup_cmd}" > "${target}"
+    fi
+    if [[ "$?" -eq 0 ]];then
+      send_slack_message_and_echo "Backed up files in '${FILES_PATH}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
+    else
+      send_slack_message_and_echo "Error: Failed to back up files in '${FILES_PATH}' from container '${CONTAINER}' in pod '${POD}' to '${target}'" danger
     fi
   else
-    local target="${BACKUP_PATH}/${backup_filename}"
-    echo "Backing up files in '${FILES_PATH}' from container '${CONTAINER}' in pod '${POD}' to '${target}'"
-    mkdir -p "${BACKUP_PATH}"
-    if [[ "${DRY_RUN}" != "true" ]]; then
-      $cmd bash -c "${backup_cmd}" > "${target}"
-    else
-      echo "Skipping backup, dry run delected"
-    fi
+    echo "Skipping backup, dry run delected"
   fi
 }
 
