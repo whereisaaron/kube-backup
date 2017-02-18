@@ -16,7 +16,7 @@
 # - Missing dependancy: 3
 #
 
-VERSION=0.1.4
+VERSION=0.1.5
 
 # Pipes have non-zero exit code if any step fail (rather than only the last)
 set -o pipefail
@@ -36,7 +36,7 @@ Usage:
     [--pod=<pod-name>|--selector=<selector>] [--container=<container-name>] [--secret=<secret name>]
     [--s3-bucket=<bucket name>] [--s3-prefix=<prefix>] [--aws-secret=<secret name>]
     [--use-kubeconfig-from-secret|--kubeconfig-secret=<secret name>]
-    [--slack-secret=<secret name>]
+    [--slack-secret=<secret name>] [--slack-pretext=<text>]
     [--timestamp=<timestamp>] [--backup-name=<backup name>]
     [--dry-run]
   ${script_name} --help
@@ -49,6 +49,7 @@ Notes:
   --s3-prefix is inserted at the beginning of the S3 prefix
   --backup-name will replace e.g. the database name or file path
   --dry-run will do everything except the actual backup
+  --slack-pretext may include links using the Slack '<url|text>' syntax
 
 END
 }
@@ -242,7 +243,7 @@ get_s3_secret ()
     return 0
   else
     echo "Failed to load S3 bucket from '$secret_name' secret"
-    return 1
+    return 2
   fi
 }
 
@@ -267,7 +268,7 @@ get_slack_secret ()
 
   if [[ -z "${secret_name}" ]]; then
     echo "No Slack secret name specified"
-    exit 2
+    exit 3
   fi
 
   local secret=$($KUBECTL get secret ${secret_name} -o jsonpath='{.data.SLACK_WEBHOOK}')
@@ -277,7 +278,7 @@ get_slack_secret ()
     return 0
   else
     echo "Failed to load Slack webhook from '$secret_name' secret"
-    return 1
+    return 2
   fi
 }
 
@@ -302,8 +303,11 @@ send_slack_message ()
   local body
   read -r -d '' body <<SLACKEND
 {
+  "username": "Kube Backup",
+  "icon_url": "https://kubernetes.io/images/wheel.png",
   "attachments": [
     {
+      "pretext": "${SLACK_PRETEXT}",
       "fallback": "${message}",
       "color": "${color}",
       "text": "${message}"
@@ -366,7 +370,7 @@ backup_mysql_exec ()
   check_container 'POD' 'CONTAINER'
   if [[ "$?" -ne 0 ]]; then
     echo "Aborting backup, no container selected"
-    exit 1
+    exit 3
   fi
 
   check_for_s3_secret $AWS_SECRET
@@ -548,7 +552,11 @@ case $i in
   shift # past argument=value
   ;;
   --slack-secret=*)
-  AWS_SECRET="${i#*=}"
+  SLACK_SECRET="${i#*=}"
+  shift # past argument=value
+  ;;
+  --slack-pretext=*)
+  SLACK_PRETEXT="${i#*=}"
   shift # past argument=value
   ;;
   --kubeconfig-secret=*)

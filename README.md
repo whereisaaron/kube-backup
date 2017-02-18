@@ -18,20 +18,20 @@ for an example deployment.
 
 Back up a files using `tar` in a container. It assumes `bash`, `tar`, and `gzip` is available.
 ```
-kubectl run --attach --rm --restart=Never kube-backup --image whereisaaron/kube-backup:0.1.4 -- \
+kubectl run --attach --rm --restart=Never kube-backup --image whereisaaron/kube-backup:0.1.5 -- \
  --task=backup-files-exec --namespace=default --pod=my-pod --container=website --files-path=/var/www
 ```
 
 Back up a database using `mysqldump` run in the MySQL container. It assumes the environment variables
 based on the [offical MySQL container images](https://hub.docker.com/_/mysql/) and that `gzip` is available.
 ```
-kubectl run --attach --rm --restart=Never kube-backup --image whereisaaron/kube-backup:0.1.4 -- \
+kubectl run --attach --rm --restart=Never kube-backup --image whereisaaron/kube-backup:0.1.5 -- \
  --task=backup-mysql-exec --namespace=default --pod=my-pod --container=mysql
 ```
 
 You could also schedule a backup to run daily.
 ```
-kubectl run --schedule='@daily' --restart=Never kube-backup --image whereisaaron/kube-backup:0.1.4 -- \
+kubectl run --schedule='@daily' --restart=Never kube-backup --image whereisaaron/kube-backup:0.1.5 -- \
  --task=backup-files-exec --namespace=default --pod=my-pod --container=website --files-path=/var/www
 ```
 
@@ -84,7 +84,7 @@ run_name () {
 }
 #EXTRA_OPTS='--dry-run'
 
-CMD='kubectl run --attach --restart=Never --rm --image=whereisaaron/kube-backup:0.1.4 --namespace=kube-backup'
+CMD='kubectl run --attach --restart=Never --rm --image=whereisaaron/kube-backup:0.1.5 --namespace=kube-backup'
 
 $CMD $(run_name) -- $EXTRA_OPTS \
   --task=backup-mysql-exec \
@@ -120,7 +120,7 @@ function Run-Name () {
 #$ExtraOpts = '--dry-run'
 
 # The '--attach --rm' allows us to block until completion, you could remove that not wait for completion
-$Command = 'kubectl run --attach --rm --quiet --restart=Never --image=whereisaaron/kube-backup:0.1.4 --namespace=kube-backup'
+$Command = 'kubectl run --attach --rm --quiet --restart=Never --image=whereisaaron/kube-backup:0.1.5 --namespace=kube-backup'
 
 Invoke-Expression "$Command $(Run-Name) -- $ExtraOpts --task=backup-mysql-exec --timestamp=$Timestamp --namespace=default '--selector=app=myapp,env=dev,component=mysql'"
 if ($LASTEXITCODE -ne 0) { Exit $LASTEXITCODE }
@@ -152,7 +152,7 @@ spec:
     - --selector=app=my-app,env=dev,component=website
     - --files-path=/var/www/assets
     - --backup-name=assets
-    image: whereisaaron/kube-backup:0.1.4
+    image: whereisaaron/kube-backup:0.1.5
     name: kb-task
   restartPolicy: Never
 ```

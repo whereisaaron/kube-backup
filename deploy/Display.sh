@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Usage:
-#   ./Display
-#   ./Display -o yaml
+#   ./Display.sh
+#   ./Display.sh -o yaml
 
 kubectl get namespace,secret,clusterrole,clusterrolebinding --selector=app=kube-backup --namespace=kube-backup $@
